@@ -686,12 +686,19 @@ export default function Home() {
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link
-          href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400&display=swap"
+          href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400&display=swap"
           rel="stylesheet"
         />
       </Head>
 
       <style jsx global>{`
+        @font-face {
+          font-family: 'Bouba Round';
+          src: url('/BoubaRound.otf') format('opentype');
+          font-weight: normal;
+          font-style: normal;
+          font-display: swap;
+        }
         *,
         *::before,
         *::after {
@@ -703,7 +710,7 @@ export default function Home() {
           color: #1a1a1a;
         }
         body {
-          font-family: "DM Sans", sans-serif;
+          font-family: "Bouba Round", "DM Sans", sans-serif;
           -webkit-font-smoothing: antialiased;
         }
         .sel {
@@ -833,7 +840,7 @@ export default function Home() {
             <div className="fade-up" style={{ maxWidth: 480, width: "100%", textAlign: "center" }}>
               <h1
                 style={{
-                  fontFamily: "'Instrument Serif', serif",
+                  fontFamily: "'Bouba Round', sans-serif",
                   fontSize: 44,
                   fontWeight: 400,
                   lineHeight: 1.1,
