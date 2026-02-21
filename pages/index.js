@@ -305,6 +305,8 @@ export default function Home() {
   const [analysis, setAnalysis] = useState(null);
   const [dragOver, setDragOver] = useState(false);
   const [preview, setPreview] = useState(null);
+  const [elapsed, setElapsed] = useState(0);
+  const timerRef = useRef(null);
 
   // Edit state
   const [mode, setMode] = useState("solid");
@@ -350,6 +352,9 @@ export default function Home() {
       // Show preview
       setPreview(URL.createObjectURL(file));
       setStep("uploading");
+      setElapsed(0);
+      if (timerRef.current) clearInterval(timerRef.current);
+      timerRef.current = setInterval(() => setElapsed((p) => p + 1), 1000);
 
       let svgText;
 
@@ -368,6 +373,7 @@ export default function Home() {
           if (!resp.ok) throw new Error("Vectorization failed (" + resp.status + ")");
           svgText = await resp.text();
         } catch (e) {
+          if (timerRef.current) clearInterval(timerRef.current);
           setError(e.message);
           setStep("idle");
           return;
@@ -439,8 +445,10 @@ export default function Home() {
           setGType(gs.type || "linear");
           setGAngle(gs.angle || 135);
         }
+        if (timerRef.current) clearInterval(timerRef.current);
         setStep("ready");
       } catch (e) {
+        if (timerRef.current) clearInterval(timerRef.current);
         setError(e.message);
         setStep("ready");
       }
@@ -907,6 +915,9 @@ export default function Home() {
                   }}
                 />
                 <div style={{ fontSize: 14, color: "#888" }}>{statusMsg[step]}</div>
+              </div>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: "#bbb", marginTop: 2 }}>
+                {elapsed}s elapsed
               </div>
               <div style={{ fontSize: 12, color: "#bbb", marginTop: 4 }}>
                 Play while you wait!
