@@ -366,15 +366,22 @@ export default function Home() {
         try {
           const form = new FormData();
           form.append("image", file);
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 65000);
           const resp = await fetch("/api/vectorize", {
             method: "POST",
             body: form,
+            signal: controller.signal,
           });
-          if (!resp.ok) throw new Error("Vectorization failed (" + resp.status + ")");
+          clearTimeout(timeout);
+          if (!resp.ok) {
+            const errBody = await resp.text().catch(() => "");
+            throw new Error("Vectorization failed (" + resp.status + "): " + errBody);
+          }
           svgText = await resp.text();
         } catch (e) {
           if (timerRef.current) clearInterval(timerRef.current);
-          setError(e.message);
+          setError(e.name === "AbortError" ? "Vectorization timed out (65s). Try a smaller image." : e.message);
           setStep("idle");
           return;
         }
@@ -429,12 +436,16 @@ export default function Home() {
           .map((s, i) => `Shape ${i + 1}: id="${s.id}", tag=<${s.tag}>, fill="${s.fill}"`)
           .join("\n");
 
+        const ac = new AbortController();
+        const at = setTimeout(() => ac.abort(), 65000);
         const resp = await fetch("/api/analyze", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ imageBase64: pngB64, shapeData }),
+          signal: ac.signal,
         });
-        if (!resp.ok) throw new Error("Analysis failed");
+        clearTimeout(at);
+        if (!resp.ok) throw new Error("Analysis failed (" + resp.status + ")");
         const data = await resp.json();
         setAnalysis(data);
 
@@ -449,7 +460,7 @@ export default function Home() {
         setStep("ready");
       } catch (e) {
         if (timerRef.current) clearInterval(timerRef.current);
-        setError(e.message);
+        setError(e.name === "AbortError" ? "Analysis timed out (65s). Try again." : e.message);
         setStep("ready");
       }
     };
