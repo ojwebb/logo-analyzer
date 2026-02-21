@@ -1055,6 +1055,7 @@ export default function Home() {
           addLog(`Analysis report generated — ${report.summary.pathCount} paths analyzed`);
         }
       } catch (e) {
+        console.error("Structural analysis failed:", e);
         addLog(`WARNING: Structural analysis failed — ${e.message}. Continuing without hints.`);
         // Graceful fallback: pipeline continues without structural hints
       }
@@ -1136,11 +1137,40 @@ Every labeled path MUST have an assignment. Return EXACT JSON only.`;
       // ════════════════════════════════════════════════
       // STEP 4.5: Generate color versions
       // ════════════════════════════════════════════════
-      try {
-        if (registriesRef.current && localReport && svg) {
-          addLog("Generating color versions (Full, 3-5, 2, 1)…");
-          const colorizedSvgStr = svg.outerHTML;
-          const versionResults = generateAllVersions(registriesRef.current, localReport, colorizedSvgStr);
+      if (svg) {
+        const colorizedSvgStr = svg.outerHTML;
+        addLog(`Step 4.5: svg=${!!svg}, registries=${!!registriesRef.current}, report=${!!localReport}, svgLen=${colorizedSvgStr.length}`);
+        try {
+          let versionResults = [];
+          if (registriesRef.current && localReport) {
+            addLog("Generating color versions via analysis engine…");
+            versionResults = generateAllVersions(registriesRef.current, localReport, colorizedSvgStr);
+          }
+          // If engine produced nothing or failed, create versions from SVG directly
+          if (versionResults.length === 0) {
+            addLog("Analysis-based versions unavailable — extracting colors from SVG directly…");
+            // Extract unique non-white fill colors from the SVG
+            const colorSet = new Set();
+            const els = svg.querySelectorAll("path, polygon, rect, circle, ellipse, polyline");
+            els.forEach((el) => {
+              const f = el.getAttribute("fill");
+              if (f && f !== "none" && !f.startsWith("url(") && !/^#f{3,6}$/i.test(f) && !/^white$/i.test(f)) {
+                colorSet.add(f.toLowerCase());
+              }
+            });
+            const allColors = [...colorSet];
+            // Build versions by simple color reduction
+            const makeVersion = (id, label, maxC) => {
+              const palette = allColors.slice(0, maxC);
+              return { id, label, maxColors: maxC, includeGradients: id === "v_full", palette: id === "v_full" ? allColors : palette, svgString: colorizedSvgStr, mapping: null };
+            };
+            versionResults = [
+              makeVersion("v_full", "Full Color", Infinity),
+              makeVersion("v_3to5", "3-5 Color", 5),
+              makeVersion("v_2", "2 Color", 2),
+              makeVersion("v_1", "1 Color", 1),
+            ];
+          }
           setVersions(versionResults);
           if (versionResults.length > 0) {
             setActiveVersionTab(versionResults[0].id);
@@ -1152,9 +1182,20 @@ Every labeled path MUST have an assignment. Return EXACT JSON only.`;
             palettes: versionResults.map(v => ({ id: v.id, colors: v.palette })),
           });
           addLog(`Generated ${versionResults.length} versions: ${versionResults.map(v => v.label).join(", ")}`);
+        } catch (e) {
+          console.error("Version generation failed:", e);
+          addLog(`WARNING: Version generation failed — ${e.message}. Creating fallback versions…`);
+          // Absolute fallback: at least show the full-color version
+          try {
+            const fallbackVersions = [
+              { id: "v_full", label: "Full Color", maxColors: Infinity, includeGradients: true, palette: [], svgString: colorizedSvgStr, mapping: null },
+            ];
+            setVersions(fallbackVersions);
+            setActiveVersionTab("v_full");
+            setModuleMode("versions");
+            addLog("Created fallback full-color version");
+          } catch (_) { /* truly give up */ }
         }
-      } catch (e) {
-        addLog(`WARNING: Version generation failed — ${e.message}. Continuing without versions.`);
       }
 
       // ════════════════════════════════════════════════
