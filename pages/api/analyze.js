@@ -35,27 +35,26 @@ export default async function handler(req, res) {
   const { imageBase64, shapeData } = req.body;
   if (!imageBase64) return res.status(400).json({ error: "No image provided" });
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: "ANTHROPIC_API_KEY not configured" });
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: "OPENAI_API_KEY not configured" });
 
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
+        Authorization: "Bearer " + apiKey,
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
+        model: "gpt-5.2",
         max_tokens: 1024,
         messages: [
           {
             role: "user",
             content: [
               {
-                type: "image",
-                source: { type: "base64", media_type: "image/png", data: imageBase64 },
+                type: "image_url",
+                image_url: { url: "data:image/png;base64," + imageBase64, detail: "low" },
               },
               {
                 type: "text",
@@ -73,7 +72,7 @@ export default async function handler(req, res) {
     }
 
     const data = await response.json();
-    const text = data.content?.map((b) => (b.type === "text" ? b.text : "")).join("") || "";
+    const text = data.choices?.[0]?.message?.content || "";
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) return res.status(500).json({ error: "No JSON in response" });
 
