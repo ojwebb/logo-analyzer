@@ -38,7 +38,7 @@ function svgToPngBase64(svgEl) {
       w = p[2] || 512;
       h = p[3] || 512;
     }
-    const scale = Math.min(800 / w, 800 / h, 2);
+    const scale = Math.min(400 / w, 400 / h, 1);
     const cw = Math.round(w * scale),
       ch = Math.round(h * scale);
     const blob = new Blob(
