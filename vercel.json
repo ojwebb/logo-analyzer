@@ -1,4 +1,6 @@
 {
+  "buildCommand": "next build",
+  "framework": "nextjs",
   "functions": {
     "pages/api/analyze.js": {
       "maxDuration": 60
