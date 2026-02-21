@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import Head from "next/head";
 
 const FILLABLE = new Set(["path", "polygon", "rect", "circle", "ellipse", "polyline"]);
@@ -64,6 +64,231 @@ function svgToPngBase64(svgEl) {
     };
     img.src = url;
   });
+}
+
+/* ────────────────────── TETRIS ────────────────────── */
+const COLS = 10, ROWS = 20, SZ = 22;
+const TETROS = [
+  { shape: [[1,1,1,1]], color: "#00b4d8" },
+  { shape: [[1,1],[1,1]], color: "#e9c46a" },
+  { shape: [[0,1,0],[1,1,1]], color: "#9b5de5" },
+  { shape: [[1,0,0],[1,1,1]], color: "#e85d26" },
+  { shape: [[0,0,1],[1,1,1]], color: "#3b82f6" },
+  { shape: [[0,1,1],[1,1,0]], color: "#06d6a0" },
+  { shape: [[1,1,0],[0,1,1]], color: "#ef476f" },
+];
+
+function Tetris() {
+  const canvasRef = useRef(null);
+  const state = useRef(null);
+  const raf = useRef(null);
+  const lastDrop = useRef(0);
+  const keys = useRef({});
+  const lastMove = useRef(0);
+  const [score, setScore] = useState(0);
+  const [gameOver, setGameOver] = useState(false);
+
+  const init = useCallback(() => {
+    const grid = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+    const colors = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+    state.current = { grid, colors, piece: null, px: 0, py: 0, speed: 500 };
+    setScore(0);
+    setGameOver(false);
+    lastDrop.current = 0;
+    spawn();
+  }, []);
+
+  function spawn() {
+    const s = state.current;
+    const t = TETROS[Math.floor(Math.random() * TETROS.length)];
+    s.piece = { shape: t.shape.map(r => [...r]), color: t.color };
+    s.px = Math.floor((COLS - t.shape[0].length) / 2);
+    s.py = 0;
+    if (collides(s.grid, s.piece.shape, s.px, s.py)) {
+      setGameOver(true);
+    }
+  }
+
+  function collides(grid, shape, px, py) {
+    for (let r = 0; r < shape.length; r++)
+      for (let c = 0; c < shape[r].length; c++)
+        if (shape[r][c]) {
+          const nx = px + c, ny = py + r;
+          if (nx < 0 || nx >= COLS || ny >= ROWS) return true;
+          if (ny >= 0 && grid[ny][nx]) return true;
+        }
+    return false;
+  }
+
+  function lock() {
+    const s = state.current;
+    const { shape, color } = s.piece;
+    for (let r = 0; r < shape.length; r++)
+      for (let c = 0; c < shape[r].length; c++)
+        if (shape[r][c]) {
+          const ny = s.py + r, nx = s.px + c;
+          if (ny >= 0 && ny < ROWS && nx >= 0 && nx < COLS) {
+            s.grid[ny][nx] = 1;
+            s.colors[ny][nx] = color;
+          }
+        }
+    let cleared = 0;
+    for (let r = ROWS - 1; r >= 0; r--) {
+      if (s.grid[r].every(v => v)) {
+        s.grid.splice(r, 1);
+        s.colors.splice(r, 1);
+        s.grid.unshift(Array(COLS).fill(0));
+        s.colors.unshift(Array(COLS).fill(null));
+        cleared++;
+        r++;
+      }
+    }
+    if (cleared) {
+      const pts = [0, 100, 300, 500, 800][cleared] || 800;
+      setScore(p => p + pts);
+      s.speed = Math.max(100, s.speed - cleared * 15);
+    }
+    spawn();
+  }
+
+  function rotate(shape) {
+    const rows = shape.length, cols = shape[0].length;
+    const r = Array.from({ length: cols }, () => Array(rows).fill(0));
+    for (let y = 0; y < rows; y++)
+      for (let x = 0; x < cols; x++)
+        r[x][rows - 1 - y] = shape[y][x];
+    return r;
+  }
+
+  function draw() {
+    const cvs = canvasRef.current;
+    if (!cvs) return;
+    const ctx = cvs.getContext("2d");
+    const s = state.current;
+    ctx.fillStyle = "#1a1a1a";
+    ctx.fillRect(0, 0, cvs.width, cvs.height);
+    // grid lines
+    ctx.strokeStyle = "#2a2a2a";
+    ctx.lineWidth = 0.5;
+    for (let r = 0; r <= ROWS; r++) {
+      ctx.beginPath(); ctx.moveTo(0, r * SZ); ctx.lineTo(COLS * SZ, r * SZ); ctx.stroke();
+    }
+    for (let c = 0; c <= COLS; c++) {
+      ctx.beginPath(); ctx.moveTo(c * SZ, 0); ctx.lineTo(c * SZ, ROWS * SZ); ctx.stroke();
+    }
+    // locked blocks
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++)
+        if (s.grid[r][c]) {
+          ctx.fillStyle = s.colors[r][c] || "#888";
+          ctx.fillRect(c * SZ + 1, r * SZ + 1, SZ - 2, SZ - 2);
+          ctx.fillStyle = "rgba(255,255,255,0.15)";
+          ctx.fillRect(c * SZ + 1, r * SZ + 1, SZ - 2, 2);
+        }
+    // current piece
+    if (s.piece) {
+      const { shape, color } = s.piece;
+      // ghost
+      let gy = s.py;
+      while (!collides(s.grid, shape, s.px, gy + 1)) gy++;
+      ctx.fillStyle = color + "30";
+      for (let r = 0; r < shape.length; r++)
+        for (let c = 0; c < shape[r].length; c++)
+          if (shape[r][c])
+            ctx.fillRect((s.px + c) * SZ + 1, (gy + r) * SZ + 1, SZ - 2, SZ - 2);
+      // actual
+      ctx.fillStyle = color;
+      for (let r = 0; r < shape.length; r++)
+        for (let c = 0; c < shape[r].length; c++)
+          if (shape[r][c]) {
+            ctx.fillRect((s.px + c) * SZ + 1, (s.py + r) * SZ + 1, SZ - 2, SZ - 2);
+            ctx.fillStyle = "rgba(255,255,255,0.2)";
+            ctx.fillRect((s.px + c) * SZ + 1, (s.py + r) * SZ + 1, SZ - 2, 2);
+            ctx.fillStyle = color;
+          }
+    }
+  }
+
+  useEffect(() => {
+    init();
+    const onKey = (e) => {
+      if (["ArrowLeft","ArrowRight","ArrowDown","ArrowUp"," "].includes(e.key)) e.preventDefault();
+      keys.current[e.key] = true;
+    };
+    const onKeyUp = (e) => { keys.current[e.key] = false; };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
+      if (raf.current) cancelAnimationFrame(raf.current);
+    };
+  }, [init]);
+
+  useEffect(() => {
+    if (gameOver) return;
+    const loop = (ts) => {
+      const s = state.current;
+      if (!s || !s.piece) { raf.current = requestAnimationFrame(loop); return; }
+      const now = ts || 0;
+      // input
+      if (now - lastMove.current > 80) {
+        if (keys.current["ArrowLeft"] && !collides(s.grid, s.piece.shape, s.px - 1, s.py)) s.px--;
+        if (keys.current["ArrowRight"] && !collides(s.grid, s.piece.shape, s.px + 1, s.py)) s.px++;
+        if (keys.current["ArrowDown"] && !collides(s.grid, s.piece.shape, s.px, s.py + 1)) { s.py++; lastDrop.current = now; }
+        if (keys.current["ArrowUp"] || keys.current[" "]) {
+          const rot = rotate(s.piece.shape);
+          if (!collides(s.grid, rot, s.px, s.py)) s.piece.shape = rot;
+          else if (!collides(s.grid, rot, s.px - 1, s.py)) { s.piece.shape = rot; s.px--; }
+          else if (!collides(s.grid, rot, s.px + 1, s.py)) { s.piece.shape = rot; s.px++; }
+          keys.current["ArrowUp"] = false;
+          keys.current[" "] = false;
+        }
+        lastMove.current = now;
+      }
+      // gravity
+      if (now - lastDrop.current > s.speed) {
+        if (!collides(s.grid, s.piece.shape, s.px, s.py + 1)) s.py++;
+        else lock();
+        lastDrop.current = now;
+      }
+      draw();
+      raf.current = requestAnimationFrame(loop);
+    };
+    raf.current = requestAnimationFrame(loop);
+    return () => { if (raf.current) cancelAnimationFrame(raf.current); };
+  }, [gameOver]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+        <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: "#999" }}>
+          Score: {score}
+        </span>
+        {gameOver && (
+          <button onClick={init} style={{
+            padding: "4px 12px", borderRadius: 6, border: "1px solid #e5e4e0",
+            background: "#fff", color: "#e85d26", fontSize: 12, cursor: "pointer",
+            fontFamily: "'DM Sans', sans-serif", fontWeight: 600,
+          }}>
+            Restart
+          </button>
+        )}
+      </div>
+      <canvas
+        ref={canvasRef}
+        width={COLS * SZ}
+        height={ROWS * SZ}
+        style={{ borderRadius: 10, border: "1px solid #333" }}
+      />
+      {gameOver && (
+        <div style={{ fontSize: 13, color: "#e85d26", fontWeight: 600 }}>Game Over!</div>
+      )}
+      <div style={{ fontSize: 11, color: "#aaa", textAlign: "center", lineHeight: 1.5 }}>
+        Arrow keys to move &middot; Up/Space to rotate
+      </div>
+    </div>
+  );
 }
 
 /* ────────────────────── STATES ────────────────────── */
@@ -639,48 +864,55 @@ export default function Home() {
           </div>
         )}
 
-        {/* ─── PROCESSING: Spinner ─── */}
+        {/* ─── PROCESSING: Tetris ─── */}
         {isProcessing && (
           <div
+            className="fade-up"
             style={{
               flex: 1,
               display: "flex",
-              flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              gap: 16,
+              gap: 40,
+              padding: 32,
             }}
           >
-            {preview && (
-              <div
-                className="fade-up"
-                style={{
-                  width: 120,
-                  height: 120,
-                  borderRadius: 16,
-                  overflow: "hidden",
-                  border: "1px solid #eee",
-                  marginBottom: 8,
-                }}
-              >
-                <img
-                  src={preview}
-                  alt=""
-                  style={{ width: "100%", height: "100%", objectFit: "contain" }}
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+              {preview && (
+                <div
+                  style={{
+                    width: 80,
+                    height: 80,
+                    borderRadius: 12,
+                    overflow: "hidden",
+                    border: "1px solid #eee",
+                  }}
+                >
+                  <img
+                    src={preview}
+                    alt=""
+                    style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                  />
+                </div>
+              )}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div
+                  style={{
+                    width: 20,
+                    height: 20,
+                    border: "2.5px solid #eee",
+                    borderTopColor: "#e85d26",
+                    borderRadius: "50%",
+                    animation: "spin .6s linear infinite",
+                  }}
                 />
+                <div style={{ fontSize: 14, color: "#888" }}>{statusMsg[step]}</div>
               </div>
-            )}
-            <div
-              style={{
-                width: 32,
-                height: 32,
-                border: "3px solid #eee",
-                borderTopColor: "#e85d26",
-                borderRadius: "50%",
-                animation: "spin .6s linear infinite",
-              }}
-            />
-            <div style={{ fontSize: 15, color: "#888" }}>{statusMsg[step]}</div>
+              <div style={{ fontSize: 12, color: "#bbb", marginTop: 4 }}>
+                Play while you wait!
+              </div>
+            </div>
+            <Tetris />
           </div>
         )}
 
