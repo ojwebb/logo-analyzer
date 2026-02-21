@@ -347,6 +347,54 @@ export default function Home() {
     [push]
   );
 
+  /* ─── Run analysis ─── */
+  const runAnalysis = useCallback(async (currentShapes) => {
+    try {
+      const svg = svgRef.current?.querySelector("svg");
+      if (!svg) throw new Error("No SVG element");
+      addLog("Rendering SVG to PNG for analysis…");
+      const pngB64 = await svgToPngBase64(svg);
+      addLog(`PNG rendered (${(pngB64.length * 0.75 / 1024).toFixed(1)} KB)`);
+      const shapeData = (currentShapes || [])
+        .map((s, i) => `Shape ${i + 1}: id="${s.id}", tag=<${s.tag}>, fill="${s.fill}"`)
+        .join("\n");
+
+      addLog("Sending to GPT-5.2 Vision for analysis…");
+      const ac = new AbortController();
+      const at = setTimeout(() => ac.abort(), 65000);
+      const resp = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: pngB64, shapeData }),
+        signal: ac.signal,
+      });
+      clearTimeout(at);
+      addLog(`Analysis API responded: HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error("Analysis failed (" + resp.status + ")");
+      const data = await resp.json();
+      setAnalysis(data);
+      addLog(`Analysis complete — ${data.colors?.length || 0} colors, mood: ${data.mood || "n/a"}`);
+
+      if (data.gradientSuggestion?.recommended) {
+        const gs = data.gradientSuggestion;
+        setGStart(gs.startColor || "#3b82f6");
+        setGEnd(gs.endColor || "#8b5cf6");
+        setGType(gs.type || "linear");
+        setGAngle(gs.angle || 135);
+        addLog("Gradient suggestion loaded");
+      }
+      if (timerRef.current) clearInterval(timerRef.current);
+      addLog("Done!");
+      setStep("ready");
+    } catch (e) {
+      if (timerRef.current) clearInterval(timerRef.current);
+      const msg = e.name === "AbortError" ? "Analysis timed out (65s). Try again." : e.message;
+      addLog(`ERROR: ${msg}`);
+      setError(msg);
+      setStep("ready");
+    }
+  }, [addLog]);
+
   /* ─── Full pipeline: upload → vectorize (if raster) → analyze ─── */
   const processFile = useCallback(
     async (file) => {
@@ -456,54 +504,6 @@ export default function Home() {
       svg.prepend(document.createElementNS("http://www.w3.org/2000/svg", "defs"));
     }
   }, [svgSource]);
-
-  /* ─── Run analysis ─── */
-  const runAnalysis = useCallback(async (currentShapes) => {
-    try {
-      const svg = svgRef.current?.querySelector("svg");
-      if (!svg) throw new Error("No SVG element");
-      addLog("Rendering SVG to PNG for analysis…");
-      const pngB64 = await svgToPngBase64(svg);
-      addLog(`PNG rendered (${(pngB64.length * 0.75 / 1024).toFixed(1)} KB)`);
-      const shapeData = (currentShapes || [])
-        .map((s, i) => `Shape ${i + 1}: id="${s.id}", tag=<${s.tag}>, fill="${s.fill}"`)
-        .join("\n");
-
-      addLog("Sending to GPT-5.2 Vision for analysis…");
-      const ac = new AbortController();
-      const at = setTimeout(() => ac.abort(), 65000);
-      const resp = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64: pngB64, shapeData }),
-        signal: ac.signal,
-      });
-      clearTimeout(at);
-      addLog(`Analysis API responded: HTTP ${resp.status}`);
-      if (!resp.ok) throw new Error("Analysis failed (" + resp.status + ")");
-      const data = await resp.json();
-      setAnalysis(data);
-      addLog(`Analysis complete — ${data.colors?.length || 0} colors, mood: ${data.mood || "n/a"}`);
-
-      if (data.gradientSuggestion?.recommended) {
-        const gs = data.gradientSuggestion;
-        setGStart(gs.startColor || "#3b82f6");
-        setGEnd(gs.endColor || "#8b5cf6");
-        setGType(gs.type || "linear");
-        setGAngle(gs.angle || 135);
-        addLog("Gradient suggestion loaded");
-      }
-      if (timerRef.current) clearInterval(timerRef.current);
-      addLog("Done!");
-      setStep("ready");
-    } catch (e) {
-      if (timerRef.current) clearInterval(timerRef.current);
-      const msg = e.name === "AbortError" ? "Analysis timed out (65s). Try again." : e.message;
-      addLog(`ERROR: ${msg}`);
-      setError(msg);
-      setStep("ready");
-    }
-  }, [addLog]);
 
   /* ─── Click-to-select shapes ─── */
   const handleShapeClick = useCallback((e, id) => {
