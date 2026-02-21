@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh api user --jq '.login, .email, .name' 2>/dev/null)",
+      "Bash(gh api user/emails --jq '.[0].email' 2>/dev/null)",
+      "Bash(git -C /Users/oj/logo-analyzer config user.name \"ojwebb\" && git -C /Users/oj/logo-analyzer config user.email \"ojwebb@users.noreply.github.com\")",
+      "Bash(git add -A && git commit -m \"Logo Analyzer - upload, vectorize, AI analyze, edit SVG\" && git branch -M main && git remote add origin https://github.com/ojwebb/logo-analyzer.git 2>/dev/null || git -C /Users/oj/logo-analyzer remote set-url origin https://github.com/ojwebb/logo-analyzer.git)"
+    ]
+  }
+}

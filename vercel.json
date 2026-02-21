@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "pages/api/analyze.js": {
+      "maxDuration": 60
+    },
+    "pages/api/vectorize.js": {
+      "maxDuration": 60
+    }
+  }
+}
