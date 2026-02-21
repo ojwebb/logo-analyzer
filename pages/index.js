@@ -433,8 +433,11 @@ export default function Home() {
       if (FILLABLE.has(el.tagName?.toLowerCase())) {
         const f = el.getAttribute("fill");
         if (f === "none") return;
+        // Also check computed style for CSS-based fills
+        const computed = f || window.getComputedStyle(el).fill || "#000";
+        const parsedFill = computed.startsWith("rgb") ? ("#" + [...computed.matchAll(/\d+/g)].map(m => (+m[0]).toString(16).padStart(2, "0")).join("")) : computed;
         if (!el.id) el.id = "s" + i;
-        found.push({ id: el.id, tag: el.tagName, fill: f || "#000" });
+        found.push({ id: el.id, tag: el.tagName, fill: parsedFill || "#000" });
         i++;
       }
       if (el.children) [...el.children].forEach(walk);
@@ -446,8 +449,12 @@ export default function Home() {
   }, [svgSource, addLog]);
 
   /* ─── Run analysis after shapes discovered ─── */
+  const shapesReady = useRef(false);
   useEffect(() => {
-    if (step !== "analyzing" || shapes.length === 0) return;
+    if (svgSource) shapesReady.current = true;
+  }, [shapes, svgSource]);
+  useEffect(() => {
+    if (step !== "analyzing" || !shapesReady.current) return;
 
     const run = async () => {
       try {
