@@ -306,7 +306,14 @@ export default function Home() {
   const [dragOver, setDragOver] = useState(false);
   const [preview, setPreview] = useState(null);
   const [elapsed, setElapsed] = useState(0);
+  const [logs, setLogs] = useState([]);
   const timerRef = useRef(null);
+  const logStartRef = useRef(0);
+
+  const addLog = useCallback((msg) => {
+    const t = ((Date.now() - logStartRef.current) / 1000).toFixed(1);
+    setLogs((p) => [...p, { t, msg }]);
+  }, []);
 
   // Edit state
   const [mode, setMode] = useState("solid");
@@ -346,8 +353,11 @@ export default function Home() {
       setError("");
       setAnalysis(null);
       setSvgSource("");
+      setLogs([]);
+      logStartRef.current = Date.now();
 
       const isSvg = file.type === "image/svg+xml" || file.name.endsWith(".svg");
+      const sizeMB = (file.size / 1024 / 1024).toFixed(2);
 
       // Show preview
       setPreview(URL.createObjectURL(file));
@@ -356,13 +366,18 @@ export default function Home() {
       if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = setInterval(() => setElapsed((p) => p + 1), 1000);
 
+      addLog(`File selected: ${file.name} (${sizeMB} MB, ${file.type || "unknown type"})`);
+
       let svgText;
 
       if (isSvg) {
+        addLog("SVG detected — skipping vectorization");
         svgText = await file.text();
+        addLog(`SVG loaded (${(svgText.length / 1024).toFixed(1)} KB)`);
       } else {
         // Vectorize raster
         setStep("vectorizing");
+        addLog("Sending to Vectorizer.ai API…");
         try {
           const form = new FormData();
           form.append("image", file);
@@ -374,23 +389,29 @@ export default function Home() {
             signal: controller.signal,
           });
           clearTimeout(timeout);
+          addLog(`Vectorizer responded: HTTP ${resp.status}`);
           if (!resp.ok) {
             const errBody = await resp.text().catch(() => "");
             throw new Error("Vectorization failed (" + resp.status + "): " + errBody);
           }
           svgText = await resp.text();
+          addLog(`Vectorization complete (${(svgText.length / 1024).toFixed(1)} KB SVG)`);
         } catch (e) {
           if (timerRef.current) clearInterval(timerRef.current);
-          setError(e.name === "AbortError" ? "Vectorization timed out (65s). Try a smaller image." : e.message);
+          const msg = e.name === "AbortError" ? "Vectorization timed out (65s). Try a smaller image." : e.message;
+          addLog(`ERROR: ${msg}`);
+          setError(msg);
           setStep("idle");
           return;
         }
       }
 
+      addLog("Mounting SVG into editor…");
       mountSvg(svgText);
       setStep("analyzing");
+      addLog("SVG mounted — discovering shapes…");
     },
-    [mountSvg]
+    [mountSvg, addLog]
   );
 
   /* ─── Discover shapes on SVG mount ─── */
@@ -421,7 +442,8 @@ export default function Home() {
     walk(svg);
     setShapes(found);
     setSel(new Set());
-  }, [svgSource]);
+    addLog(`Found ${found.length} editable shapes`);
+  }, [svgSource, addLog]);
 
   /* ─── Run analysis after shapes discovered ─── */
   useEffect(() => {
@@ -431,11 +453,14 @@ export default function Home() {
       try {
         const svg = svgRef.current?.querySelector("svg");
         if (!svg) throw new Error("No SVG element");
+        addLog("Rendering SVG to PNG for analysis…");
         const pngB64 = await svgToPngBase64(svg);
+        addLog(`PNG rendered (${(pngB64.length * 0.75 / 1024).toFixed(1)} KB)`);
         const shapeData = shapes
           .map((s, i) => `Shape ${i + 1}: id="${s.id}", tag=<${s.tag}>, fill="${s.fill}"`)
           .join("\n");
 
+        addLog("Sending to GPT-5.2 Vision for analysis…");
         const ac = new AbortController();
         const at = setTimeout(() => ac.abort(), 65000);
         const resp = await fetch("/api/analyze", {
@@ -445,9 +470,11 @@ export default function Home() {
           signal: ac.signal,
         });
         clearTimeout(at);
+        addLog(`Analysis API responded: HTTP ${resp.status}`);
         if (!resp.ok) throw new Error("Analysis failed (" + resp.status + ")");
         const data = await resp.json();
         setAnalysis(data);
+        addLog(`Analysis complete — ${data.colors?.length || 0} colors, mood: ${data.mood || "n/a"}`);
 
         if (data.gradientSuggestion?.recommended) {
           const gs = data.gradientSuggestion;
@@ -455,12 +482,16 @@ export default function Home() {
           setGEnd(gs.endColor || "#8b5cf6");
           setGType(gs.type || "linear");
           setGAngle(gs.angle || 135);
+          addLog("Gradient suggestion loaded");
         }
         if (timerRef.current) clearInterval(timerRef.current);
+        addLog("Done!");
         setStep("ready");
       } catch (e) {
         if (timerRef.current) clearInterval(timerRef.current);
-        setError(e.name === "AbortError" ? "Analysis timed out (65s). Try again." : e.message);
+        const msg = e.name === "AbortError" ? "Analysis timed out (65s). Try again." : e.message;
+        addLog(`ERROR: ${msg}`);
+        setError(msg);
         setStep("ready");
       }
     };
@@ -806,17 +837,12 @@ export default function Home() {
                   fontSize: 44,
                   fontWeight: 400,
                   lineHeight: 1.1,
-                  marginBottom: 12,
+                  marginBottom: 36,
                   color: "#1a1a1a",
                 }}
               >
                 Upload your logo
               </h1>
-              <p style={{ fontSize: 16, color: "#888", marginBottom: 36, lineHeight: 1.5 }}>
-                Drop any image — PNG, JPG, or SVG.
-                <br />
-                We'll vectorize it, analyze the brand, and let you edit.
-              </p>
 
               <div
                 onDragOver={(e) => {
@@ -867,58 +893,93 @@ export default function Home() {
           </div>
         )}
 
-        {/* ─── PROCESSING: Tetris ─── */}
+        {/* ─── PROCESSING: Tetris + Log ─── */}
         {isProcessing && (
           <div
             className="fade-up"
             style={{
               flex: 1,
               display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 40,
-              padding: 32,
+              flexDirection: "column",
+              minHeight: 0,
             }}
           >
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-              {preview && (
-                <div
-                  style={{
-                    width: 80,
-                    height: 80,
-                    borderRadius: 12,
-                    overflow: "hidden",
-                    border: "1px solid #eee",
-                  }}
-                >
-                  <img
-                    src={preview}
-                    alt=""
-                    style={{ width: "100%", height: "100%", objectFit: "contain" }}
+            <div
+              style={{
+                flex: 1,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 40,
+                padding: "24px 32px 12px",
+              }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+                {preview && (
+                  <div
+                    style={{
+                      width: 80,
+                      height: 80,
+                      borderRadius: 12,
+                      overflow: "hidden",
+                      border: "1px solid #eee",
+                    }}
+                  >
+                    <img
+                      src={preview}
+                      alt=""
+                      style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                    />
+                  </div>
+                )}
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div
+                    style={{
+                      width: 20,
+                      height: 20,
+                      border: "2.5px solid #eee",
+                      borderTopColor: "#e85d26",
+                      borderRadius: "50%",
+                      animation: "spin .6s linear infinite",
+                    }}
                   />
+                  <div style={{ fontSize: 14, color: "#888" }}>{statusMsg[step]}</div>
                 </div>
-              )}
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div
-                  style={{
-                    width: 20,
-                    height: 20,
-                    border: "2.5px solid #eee",
-                    borderTopColor: "#e85d26",
-                    borderRadius: "50%",
-                    animation: "spin .6s linear infinite",
-                  }}
-                />
-                <div style={{ fontSize: 14, color: "#888" }}>{statusMsg[step]}</div>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: "#bbb" }}>
+                  {elapsed}s elapsed
+                </div>
+                <div style={{ fontSize: 12, color: "#bbb", marginTop: 2 }}>
+                  Play while you wait!
+                </div>
               </div>
-              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: "#bbb", marginTop: 2 }}>
-                {elapsed}s elapsed
-              </div>
-              <div style={{ fontSize: 12, color: "#bbb", marginTop: 4 }}>
-                Play while you wait!
+              <Tetris />
+            </div>
+            {/* Log panel */}
+            <div
+              style={{
+                borderTop: "1px solid #eeede9",
+                background: "#1a1a1a",
+                padding: "10px 16px",
+                maxHeight: 180,
+                overflowY: "auto",
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 11,
+                lineHeight: 1.7,
+              }}
+              ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }}
+            >
+              {logs.map((l, i) => (
+                <div key={i}>
+                  <span style={{ color: "#666" }}>[{l.t}s]</span>{" "}
+                  <span style={{ color: l.msg.startsWith("ERROR") ? "#ef476f" : l.msg === "Done!" ? "#06d6a0" : "#aaa" }}>
+                    {l.msg}
+                  </span>
+                </div>
+              ))}
+              <div style={{ color: "#555" }}>
+                <span style={{ animation: "spin .6s linear infinite", display: "inline-block" }}>⠋</span> waiting…
               </div>
             </div>
-            <Tetris />
           </div>
         )}
 
