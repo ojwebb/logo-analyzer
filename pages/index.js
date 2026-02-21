@@ -409,12 +409,40 @@ export default function Home() {
       addLog("Mounting SVG into editor…");
       mountSvg(svgText);
       setStep("analyzing");
-      addLog("SVG mounted — discovering shapes…");
+
+      // Wait a tick for React to render the SVG so shapes can be discovered
+      await new Promise((r) => setTimeout(r, 100));
+
+      // Discover shapes directly
+      const svg = svgRef.current?.querySelector("svg");
+      const found = [];
+      if (svg) {
+        let si = 0;
+        const walk = (el) => {
+          if (FILLABLE.has(el.tagName?.toLowerCase())) {
+            const f = el.getAttribute("fill");
+            if (f === "none") return;
+            const computed = f || window.getComputedStyle(el).fill || "#000";
+            const parsedFill = computed.startsWith("rgb") ? ("#" + [...computed.matchAll(/\d+/g)].map(m => (+m[0]).toString(16).padStart(2, "0")).join("")) : computed;
+            if (!el.id) el.id = "s" + si;
+            found.push({ id: el.id, tag: el.tagName, fill: parsedFill || "#000" });
+            si++;
+          }
+          if (el.children) [...el.children].forEach(walk);
+        };
+        walk(svg);
+      }
+      setShapes(found);
+      setSel(new Set());
+      addLog(`Found ${found.length} editable shapes`);
+
+      // Run analysis
+      await runAnalysis(found);
     },
-    [mountSvg, addLog]
+    [mountSvg, addLog, runAnalysis]
   );
 
-  /* ─── Discover shapes on SVG mount ─── */
+  /* ─── Re-render SVG on source change (edits, undo/redo) ─── */
   useEffect(() => {
     if (!svgSource || !svgRef.current) return;
     const c = svgRef.current;
@@ -427,83 +455,55 @@ export default function Home() {
     if (!svg.querySelector("defs")) {
       svg.prepend(document.createElementNS("http://www.w3.org/2000/svg", "defs"));
     }
-    const found = [];
-    let i = 0;
-    const walk = (el) => {
-      if (FILLABLE.has(el.tagName?.toLowerCase())) {
-        const f = el.getAttribute("fill");
-        if (f === "none") return;
-        // Also check computed style for CSS-based fills
-        const computed = f || window.getComputedStyle(el).fill || "#000";
-        const parsedFill = computed.startsWith("rgb") ? ("#" + [...computed.matchAll(/\d+/g)].map(m => (+m[0]).toString(16).padStart(2, "0")).join("")) : computed;
-        if (!el.id) el.id = "s" + i;
-        found.push({ id: el.id, tag: el.tagName, fill: parsedFill || "#000" });
-        i++;
+  }, [svgSource]);
+
+  /* ─── Run analysis ─── */
+  const runAnalysis = useCallback(async (currentShapes) => {
+    try {
+      const svg = svgRef.current?.querySelector("svg");
+      if (!svg) throw new Error("No SVG element");
+      addLog("Rendering SVG to PNG for analysis…");
+      const pngB64 = await svgToPngBase64(svg);
+      addLog(`PNG rendered (${(pngB64.length * 0.75 / 1024).toFixed(1)} KB)`);
+      const shapeData = (currentShapes || [])
+        .map((s, i) => `Shape ${i + 1}: id="${s.id}", tag=<${s.tag}>, fill="${s.fill}"`)
+        .join("\n");
+
+      addLog("Sending to GPT-5.2 Vision for analysis…");
+      const ac = new AbortController();
+      const at = setTimeout(() => ac.abort(), 65000);
+      const resp = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: pngB64, shapeData }),
+        signal: ac.signal,
+      });
+      clearTimeout(at);
+      addLog(`Analysis API responded: HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error("Analysis failed (" + resp.status + ")");
+      const data = await resp.json();
+      setAnalysis(data);
+      addLog(`Analysis complete — ${data.colors?.length || 0} colors, mood: ${data.mood || "n/a"}`);
+
+      if (data.gradientSuggestion?.recommended) {
+        const gs = data.gradientSuggestion;
+        setGStart(gs.startColor || "#3b82f6");
+        setGEnd(gs.endColor || "#8b5cf6");
+        setGType(gs.type || "linear");
+        setGAngle(gs.angle || 135);
+        addLog("Gradient suggestion loaded");
       }
-      if (el.children) [...el.children].forEach(walk);
-    };
-    walk(svg);
-    setShapes(found);
-    setSel(new Set());
-    addLog(`Found ${found.length} editable shapes`);
-  }, [svgSource, addLog]);
-
-  /* ─── Run analysis after shapes discovered ─── */
-  const shapesReady = useRef(false);
-  useEffect(() => {
-    if (svgSource) shapesReady.current = true;
-  }, [shapes, svgSource]);
-  useEffect(() => {
-    if (step !== "analyzing" || !shapesReady.current) return;
-
-    const run = async () => {
-      try {
-        const svg = svgRef.current?.querySelector("svg");
-        if (!svg) throw new Error("No SVG element");
-        addLog("Rendering SVG to PNG for analysis…");
-        const pngB64 = await svgToPngBase64(svg);
-        addLog(`PNG rendered (${(pngB64.length * 0.75 / 1024).toFixed(1)} KB)`);
-        const shapeData = shapes
-          .map((s, i) => `Shape ${i + 1}: id="${s.id}", tag=<${s.tag}>, fill="${s.fill}"`)
-          .join("\n");
-
-        addLog("Sending to GPT-5.2 Vision for analysis…");
-        const ac = new AbortController();
-        const at = setTimeout(() => ac.abort(), 65000);
-        const resp = await fetch("/api/analyze", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageBase64: pngB64, shapeData }),
-          signal: ac.signal,
-        });
-        clearTimeout(at);
-        addLog(`Analysis API responded: HTTP ${resp.status}`);
-        if (!resp.ok) throw new Error("Analysis failed (" + resp.status + ")");
-        const data = await resp.json();
-        setAnalysis(data);
-        addLog(`Analysis complete — ${data.colors?.length || 0} colors, mood: ${data.mood || "n/a"}`);
-
-        if (data.gradientSuggestion?.recommended) {
-          const gs = data.gradientSuggestion;
-          setGStart(gs.startColor || "#3b82f6");
-          setGEnd(gs.endColor || "#8b5cf6");
-          setGType(gs.type || "linear");
-          setGAngle(gs.angle || 135);
-          addLog("Gradient suggestion loaded");
-        }
-        if (timerRef.current) clearInterval(timerRef.current);
-        addLog("Done!");
-        setStep("ready");
-      } catch (e) {
-        if (timerRef.current) clearInterval(timerRef.current);
-        const msg = e.name === "AbortError" ? "Analysis timed out (65s). Try again." : e.message;
-        addLog(`ERROR: ${msg}`);
-        setError(msg);
-        setStep("ready");
-      }
-    };
-    run();
-  }, [step, shapes]);
+      if (timerRef.current) clearInterval(timerRef.current);
+      addLog("Done!");
+      setStep("ready");
+    } catch (e) {
+      if (timerRef.current) clearInterval(timerRef.current);
+      const msg = e.name === "AbortError" ? "Analysis timed out (65s). Try again." : e.message;
+      addLog(`ERROR: ${msg}`);
+      setError(msg);
+      setStep("ready");
+    }
+  }, [addLog]);
 
   /* ─── Click-to-select shapes ─── */
   const handleShapeClick = useCallback((e, id) => {
