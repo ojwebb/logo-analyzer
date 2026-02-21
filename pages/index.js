@@ -650,7 +650,7 @@ export default function Home() {
   return (
     <>
       <Head>
-        <title>Logo Analyzer</title>
+        <title>Merch.ai - Logo Analyzer</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
@@ -760,30 +760,14 @@ export default function Home() {
           }}
         >
           <div
-            style={{ display: "flex", alignItems: "baseline", gap: 8, cursor: "pointer" }}
+            style={{ display: "flex", alignItems: "center", cursor: "pointer" }}
             onClick={startOver}
           >
-            <span
-              style={{
-                fontFamily: "'Instrument Serif', serif",
-                fontSize: 22,
-                fontWeight: 400,
-                color: "#1a1a1a",
-              }}
-            >
-              Logo Analyzer
-            </span>
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 500,
-                color: "#e85d26",
-                letterSpacing: ".06em",
-                textTransform: "uppercase",
-              }}
-            >
-              Demo
-            </span>
+            <img
+              src="/logo.svg"
+              alt="Merch.ai"
+              style={{ height: 28 }}
+            />
           </div>
           {isReady && (
             <div style={{ display: "flex", gap: 8 }}>
